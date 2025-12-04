@@ -96,29 +96,39 @@ if st.button("🚀 Calcular Risco"):
             st.subheader("Explicabilidade (SHAP)")
             with st.spinner("Analisando motivos..."):
                 try:
-                    # TENTATIVA 1: TreeExplainer (Rápido, ideal para Árvores/XGBoost)
+                    # Tenta usar TreeExplainer
                     explainer = shap.TreeExplainer(model)
                     shap_values = explainer.shap_values(X_final)
                 except Exception:
-                    # TENTATIVA 2: KernelExplainer (Lento, mas funciona para QUALQUER modelo, inclusive AdaBoost)
-                    # Usamos o próprio input como referência simplificada para não precisar carregar o dataset de treino inteiro
+                    # Fallback para KernelExplainer (Genérico)
                     explainer = shap.KernelExplainer(model.predict_proba, X_final)
                     shap_values = explainer.shap_values(X_final)
                 
-                # Tratamento de formato de lista (comum em classificadores binários)
+                # Tratamento de formato de lista
                 if isinstance(shap_values, list):
-                    vals = shap_values[1] # Pega a classe positiva
+                    vals = shap_values[1]
                 else:
                     vals = shap_values
                 
-                # Se as dimensões não baterem (erro de array 3D vs 2D), forçamos o reshape
                 if len(vals.shape) > 2:
                     vals = vals[:,:,1]
 
-                # Gráfico
-                fig, ax = plt.subplots(figsize=(8, 4))
+                # --- CORREÇÃO DO GRÁFICO EM BRANCO ---
+                # 1. Limpa qualquer figura anterior
+                plt.clf()
+                
+                # 2. Gera o gráfico (sem mostrar ainda)
                 shap.summary_plot(vals, input_processed, plot_type="bar", 
                                 feature_names=input_data.columns, show=False)
+                
+                # 3. Captura a figura atual explicitamente
+                fig = plt.gcf()
+                
+                # 4. Ajusta o tamanho para não cortar textos
+                fig.set_size_inches(10, 5)
+                plt.tight_layout()
+                
+                # 5. Exibe no Streamlit
                 st.pyplot(fig)
 
     except Exception as e:
