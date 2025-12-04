@@ -19,7 +19,6 @@ st.markdown("""
 @st.cache_resource
 def load_data():
     try:
-        # Carregamos Modelo, Scaler (Preprocessador) e Encoders (Tradutores)
         model = joblib.load('modelo_credifast.pkl')
         scaler = joblib.load('preprocessor.pkl')
         encoders = joblib.load('encoders.pkl')
@@ -48,10 +47,9 @@ rate = st.sidebar.number_input("Taxa de Juros (%)", 4.0, 25.0, 10.0)
 default = st.sidebar.selectbox("Já teve Inadimplência?", ['N', 'Y'])
 cred_hist = st.sidebar.number_input("Histórico de Crédito (anos)", 2, 30, 4)
 
-# Lógica igual ao notebook
 percent_income = amount / income if income > 0 else 0
 
-# Criar DataFrame com as colunas na ORDEM EXATA do treinamento
+# DataFrame Input
 input_data = pd.DataFrame([{
     'person_age': age,
     'person_income': income,
@@ -70,17 +68,13 @@ input_data = pd.DataFrame([{
 if st.button("🚀 Calcular Risco"):
     try:
         # 1. TRADUÇÃO (Label Encoding)
-        # Convertemos texto para números usando os encoders salvos
         input_processed = input_data.copy()
-        
         for col, le in encoders.items():
             if col in input_processed.columns:
-                # O encoder espera um array, transformamos o valor único
                 valor_texto = input_processed[col].astype(str)
                 input_processed[col] = le.transform(valor_texto)
 
-        # 2. ESCALONAMENTO (StandardScaler)
-        # Agora que tudo é número, podemos aplicar a matemática
+        # 2. ESCALONAMENTO
         X_final = scaler.transform(input_processed)
 
         # 3. PREDIÇÃO
@@ -101,15 +95,26 @@ if st.button("🚀 Calcular Risco"):
         with col2:
             st.subheader("Explicabilidade (SHAP)")
             with st.spinner("Analisando motivos..."):
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(X_final)
+                try:
+                    # TENTATIVA 1: TreeExplainer (Rápido, ideal para Árvores/XGBoost)
+                    explainer = shap.TreeExplainer(model)
+                    shap_values = explainer.shap_values(X_final)
+                except Exception:
+                    # TENTATIVA 2: KernelExplainer (Lento, mas funciona para QUALQUER modelo, inclusive AdaBoost)
+                    # Usamos o próprio input como referência simplificada para não precisar carregar o dataset de treino inteiro
+                    explainer = shap.KernelExplainer(model.predict_proba, X_final)
+                    shap_values = explainer.shap_values(X_final)
                 
-                # Ajuste para formatos diferentes de retorno do SHAP
+                # Tratamento de formato de lista (comum em classificadores binários)
                 if isinstance(shap_values, list):
-                    vals = shap_values[1]
+                    vals = shap_values[1] # Pega a classe positiva
                 else:
                     vals = shap_values
                 
+                # Se as dimensões não baterem (erro de array 3D vs 2D), forçamos o reshape
+                if len(vals.shape) > 2:
+                    vals = vals[:,:,1]
+
                 # Gráfico
                 fig, ax = plt.subplots(figsize=(8, 4))
                 shap.summary_plot(vals, input_processed, plot_type="bar", 
