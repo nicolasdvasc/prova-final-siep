@@ -79,57 +79,73 @@ if st.button("🚀 Calcular Risco"):
 
         # 3. PREDIÇÃO
         proba = model.predict_proba(X_final)[:, 1][0]
+        prediction = model.predict(X_final)[0]
         
         # Resultados
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Score de Risco")
+            st.subheader("📊 Resultado da Análise")
             if proba > 0.5:
                 st.error("🛑 ALTO RISCO (REPROVAR)")
-                st.metric("Probabilidade de Calote", f"{proba:.1%}", delta="-Alto Risco")
+                st.metric("Score de Risco", f"{proba:.1%}", delta="Risco Elevado", delta_color="inverse")
+                st.markdown("**Ação Recomendada:** Negar crédito ou exigir garantias.")
             else:
                 st.success("✅ BAIXO RISCO (APROVAR)")
-                st.metric("Probabilidade de Calote", f"{proba:.1%}", delta="Baixo Risco")
+                st.metric("Score de Risco", f"{proba:.1%}", delta="Aprovado", delta_color="normal")
+                st.markdown("**Ação Recomendada:** Conceder crédito.")
 
         with col2:
-            st.subheader("Explicabilidade (SHAP)")
-            with st.spinner("Analisando motivos..."):
+            st.subheader("🔍 Por que este resultado?")
+            with st.spinner("Gerando gráfico detalhado (Waterfall)..."):
                 try:
-                    # Tenta usar TreeExplainer
-                    explainer = shap.TreeExplainer(model)
-                    shap_values = explainer.shap_values(X_final)
-                except Exception:
-                    # Fallback para KernelExplainer (Genérico)
-                    explainer = shap.KernelExplainer(model.predict_proba, X_final)
-                    shap_values = explainer.shap_values(X_final)
-                
-                # Tratamento de formato de lista
-                if isinstance(shap_values, list):
-                    vals = shap_values[1]
-                else:
-                    vals = shap_values
-                
-                if len(vals.shape) > 2:
-                    vals = vals[:,:,1]
+                    # --- CÁLCULO DO SHAP ---
+                    # Tenta TreeExplainer (Rápido), se falhar vai de KernelExplainer (Lento/Genérico)
+                    try:
+                        explainer = shap.TreeExplainer(model)
+                        shap_values = explainer.shap_values(X_final)
+                        expected_value = explainer.expected_value
+                    except Exception:
+                        explainer = shap.KernelExplainer(model.predict_proba, X_final)
+                        shap_values = explainer.shap_values(X_final)
+                        expected_value = explainer.expected_value
 
-                # --- CORREÇÃO DO GRÁFICO EM BRANCO ---
-                # 1. Limpa qualquer figura anterior
-                plt.clf()
-                
-                # 2. Gera o gráfico (sem mostrar ainda)
-                shap.summary_plot(vals, input_processed, plot_type="bar", 
-                                feature_names=input_data.columns, show=False)
-                
-                # 3. Captura a figura atual explicitamente
-                fig = plt.gcf()
-                
-                # 4. Ajusta o tamanho para não cortar textos
-                fig.set_size_inches(10, 5)
-                plt.tight_layout()
-                
-                # 5. Exibe no Streamlit
-                st.pyplot(fig)
+                    # --- TRATAMENTO DOS DADOS PARA O GRÁFICO ---
+                    # O SHAP retorna listas ou arrays dependendo do modelo. 
+                    # Precisamos garantir que estamos pegando os números certos.
+                    
+                    # Se for lista (comum em classificação binária), pega a classe 1 (Risco/Bad)
+                    if isinstance(shap_values, list):
+                        shap_values = shap_values[1]
+                        expected_value = expected_value[1]
+                    
+                    # Se tiver dimensão extra (ex: [[...]]), remove para ficar 1D ([...])
+                    if len(shap_values.shape) > 1:
+                        shap_values = shap_values[0]
+                    
+                    # Cria um objeto de Explicação robusto
+                    # Isso "cola" os valores matemáticos com os nomes das colunas e os dados originais
+                    explanation = shap.Explanation(
+                        values=shap_values,
+                        base_values=expected_value,
+                        data=input_data.iloc[0].values, # Mostra os dados originais no gráfico (mais bonito)
+                        feature_names=input_data.columns
+                    )
+
+                    # --- PLOTAGEM ---
+                    # Cria a figura explicitamente
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    
+                    # Desenha o Waterfall
+                    shap.plots.waterfall(explanation, show=False)
+                    
+                    # Exibe no Streamlit
+                    st.pyplot(fig, bbox_inches='tight')
+                    
+                    st.caption("Gráfico Waterfall: Mostra como cada característica empurrou a nota do cliente para cima (risco) ou para baixo (segurança) a partir da média.")
+
+                except Exception as e:
+                    st.warning(f"Não foi possível gerar o gráfico SHAP. Detalhe do erro: {e}")
 
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro crítico no processamento: {e}")
