@@ -6,9 +6,6 @@
 # ========================================================================
 
 # Core
-python>=3.8
-
-# Data manipulation
 pandas>=1.5.0
 numpy>=1.23.0
 
@@ -31,4 +28,3 @@ streamlit>=1.25.0
 
 # Utilities
 joblib>=1.2.0
-pickle5>=0.0.11
