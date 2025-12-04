@@ -79,7 +79,6 @@ if st.button("🚀 Calcular Risco"):
 
         # 3. PREDIÇÃO
         proba = model.predict_proba(X_final)[:, 1][0]
-        prediction = model.predict(X_final)[0]
         
         # Resultados
         col1, col2 = st.columns(2)
@@ -89,7 +88,7 @@ if st.button("🚀 Calcular Risco"):
             if proba > 0.5:
                 st.error("🛑 ALTO RISCO (REPROVAR)")
                 st.metric("Score de Risco", f"{proba:.1%}", delta="Risco Elevado", delta_color="inverse")
-                st.markdown("**Ação Recomendada:** Negar crédito ou exigir garantias.")
+                st.markdown("**Ação Recomendada:** Negar crédito.")
             else:
                 st.success("✅ BAIXO RISCO (APROVAR)")
                 st.metric("Score de Risco", f"{proba:.1%}", delta="Aprovado", delta_color="normal")
@@ -97,55 +96,60 @@ if st.button("🚀 Calcular Risco"):
 
         with col2:
             st.subheader("🔍 Por que este resultado?")
-            with st.spinner("Gerando gráfico detalhado (Waterfall)..."):
+            with st.spinner("Gerando explicação (SHAP)..."):
                 try:
-                    # --- CÁLCULO DO SHAP ---
-                    # Tenta TreeExplainer (Rápido), se falhar vai de KernelExplainer (Lento/Genérico)
+                    # Tenta criar o explicador
                     try:
                         explainer = shap.TreeExplainer(model)
                         shap_values = explainer.shap_values(X_final)
-                        expected_value = explainer.expected_value
-                    except Exception:
+                        base_value = explainer.expected_value
+                    except:
+                        # Fallback para KernelExplainer
                         explainer = shap.KernelExplainer(model.predict_proba, X_final)
                         shap_values = explainer.shap_values(X_final)
-                        expected_value = explainer.expected_value
+                        base_value = explainer.expected_value
 
-                    # --- TRATAMENTO DOS DADOS PARA O GRÁFICO ---
-                    # O SHAP retorna listas ou arrays dependendo do modelo. 
-                    # Precisamos garantir que estamos pegando os números certos.
+                    # --- CORREÇÃO DE DIMENSÃO (O SEU ERRO ESTAVA AQUI) ---
+                    # O objetivo é ficar apenas com um array 1D de tamanho 11 (features)
                     
-                    # Se for lista (comum em classificação binária), pega a classe 1 (Risco/Bad)
-                    if isinstance(shap_values, list):
-                        shap_values = shap_values[1]
-                        expected_value = expected_value[1]
+                    vals = shap_values
                     
-                    # Se tiver dimensão extra (ex: [[...]]), remove para ficar 1D ([...])
-                    if len(shap_values.shape) > 1:
-                        shap_values = shap_values[0]
+                    # Caso 1: Se for lista (ex: [matriz_classe0, matriz_classe1]), pega a classe 1
+                    if isinstance(vals, list):
+                        vals = vals[1]
+                        if isinstance(base_value, list):
+                            base_value = base_value[1]
+
+                    # Caso 2: Se for 3D (1 amostra, 11 features, 2 classes) -> Pega amostra 0 e classe 1
+                    if len(vals.shape) == 3:
+                        vals = vals[0, :, 1]
                     
-                    # Cria um objeto de Explicação robusto
-                    # Isso "cola" os valores matemáticos com os nomes das colunas e os dados originais
+                    # Caso 3: Se for 2D (1 amostra, 11 features) -> Pega amostra 0
+                    elif len(vals.shape) == 2 and vals.shape[0] == 1:
+                        vals = vals[0]
+                        
+                    # Caso 4 (O SEU ERRO): Se for 2D (11 features, 2 classes) -> Pega todas features da classe 1
+                    elif len(vals.shape) == 2 and vals.shape[1] == 2:
+                        vals = vals[:, 1]
+
+                    # Garante que o base_value seja um número único (float)
+                    if hasattr(base_value, 'shape') and len(base_value.shape) > 0:
+                         base_value = base_value[0] if len(base_value) == 1 else base_value[1]
+                    
+                    # --- CRIAÇÃO DO GRÁFICO ---
                     explanation = shap.Explanation(
-                        values=shap_values,
-                        base_values=expected_value,
-                        data=input_data.iloc[0].values, # Mostra os dados originais no gráfico (mais bonito)
+                        values=vals,
+                        base_values=base_value,
+                        data=input_data.iloc[0].values,
                         feature_names=input_data.columns
                     )
 
-                    # --- PLOTAGEM ---
-                    # Cria a figura explicitamente
-                    fig, ax = plt.subplots(figsize=(8, 6))
-                    
-                    # Desenha o Waterfall
+                    fig, ax = plt.subplots(figsize=(8, 5))
                     shap.plots.waterfall(explanation, show=False)
-                    
-                    # Exibe no Streamlit
                     st.pyplot(fig, bbox_inches='tight')
-                    
-                    st.caption("Gráfico Waterfall: Mostra como cada característica empurrou a nota do cliente para cima (risco) ou para baixo (segurança) a partir da média.")
 
                 except Exception as e:
-                    st.warning(f"Não foi possível gerar o gráfico SHAP. Detalhe do erro: {e}")
+                    st.warning(f"Não foi possível gerar o gráfico SHAP. Erro: {e}")
 
     except Exception as e:
-        st.error(f"Erro crítico no processamento: {e}")
+        st.error(f"Erro no processamento: {e}")
